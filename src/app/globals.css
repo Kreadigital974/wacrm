@@ -228,3 +228,21 @@ html[data-theme="rose"] {
     @apply font-sans;
   }
 }
+
+/*
+ * Accessibilité — respecter prefers-reduced-motion (WCAG 2.3.3, principe
+ * Apple WWDC "Designing Fluid Interfaces" §14). Les utilisateurs sensibles
+ * au mouvement voient des transitions quasi-instantanées plutôt que des
+ * animations/scale/slide. On garde une micro-durée (0.01ms) plutôt que 0
+ * pour ne pas casser les callbacks onTransitionEnd/onAnimationEnd.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

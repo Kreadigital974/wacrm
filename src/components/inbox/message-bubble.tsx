@@ -53,6 +53,42 @@ function MediaUnavailable({ label }: { label: string }) {
   );
 }
 
+function MediaPlayer({
+  kind,
+  url,
+  label,
+}: {
+  kind: "video" | "audio";
+  url: string;
+  label: string;
+}) {
+  const [error, setError] = useState(false);
+
+  if (error) {
+    return <MediaUnavailable label={label} />;
+  }
+
+  if (kind === "video") {
+    return (
+      <video
+        src={url}
+        controls
+        className="max-h-64 max-w-60 rounded-lg"
+        onError={() => setError(true)}
+      />
+    );
+  }
+
+  return (
+    <audio
+      src={url}
+      controls
+      className="max-w-60"
+      onError={() => setError(true)}
+    />
+  );
+}
+
 function MediaImage({ url, alt }: { url: string; alt: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
@@ -120,7 +156,7 @@ function MessageContent({ message }: { message: Message }) {
   switch (message.content_type) {
     case "text":
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
+        <p className="whitespace-pre-wrap wrap-anywhere text-sm">
           {message.content_text}
         </p>
       );
@@ -134,7 +170,7 @@ function MessageContent({ message }: { message: Message }) {
             <MediaUnavailable label="Image" />
           )}
           {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+            <p className="mt-1 whitespace-pre-wrap wrap-anywhere text-sm">
               {message.content_text}
             </p>
           )}
@@ -145,16 +181,12 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <video
-              src={message.media_url}
-              controls
-              className="max-h-64 max-w-60 rounded-lg"
-            />
+            <MediaPlayer kind="video" url={message.media_url} label="Video" />
           ) : (
             <MediaUnavailable label="Video" />
           )}
           {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+            <p className="mt-1 whitespace-pre-wrap wrap-anywhere text-sm">
               {message.content_text}
             </p>
           )}
@@ -165,17 +197,24 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <audio src={message.media_url} controls className="max-w-60" />
+            <MediaPlayer kind="audio" url={message.media_url} label="Audio" />
           ) : (
             <MediaUnavailable label="Audio" />
           )}
         </div>
       );
 
-    case "document":
+    case "document": {
       if (!message.media_url) {
         return <MediaUnavailable label={message.content_text || "Document"} />;
       }
+      // Middle-truncate the filename so the END (version suffix + extension)
+      // stays visible — end-truncation would make "Q3-report…v12.pdf" and
+      // "Q3-report…v13.pdf" look identical. CSS-based (flex) so it adapts to
+      // the real container width rather than a hard-coded character count.
+      const docName = message.content_text || "Document";
+      const tail = docName.length > 10 ? docName.slice(-7) : "";
+      const head = tail ? docName.slice(0, -7) : docName;
       return (
         <a
           href={message.media_url}
@@ -184,11 +223,13 @@ function MessageContent({ message }: { message: Message }) {
           className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
         >
           <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
-          <span className="truncate">
-            {message.content_text || "Document"}
+          <span className="flex min-w-0 flex-1" title={docName}>
+            <span className="truncate">{head}</span>
+            {tail && <span className="shrink-0">{tail}</span>}
           </span>
         </a>
       );
+    }
 
     case "template":
       return (
@@ -198,7 +239,7 @@ function MessageContent({ message }: { message: Message }) {
             Template
           </span>
           {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+            <p className="mt-1 whitespace-pre-wrap wrap-anywhere text-sm">
               {message.content_text}
             </p>
           )}
@@ -225,7 +266,7 @@ function MessageContent({ message }: { message: Message }) {
             <CornerDownLeft className="h-3 w-3" />
             Button reply
           </span>
-          <p className="whitespace-pre-wrap break-words text-sm">
+          <p className="whitespace-pre-wrap wrap-anywhere text-sm">
             {message.content_text || "[Interactive reply]"}
           </p>
         </div>
@@ -234,7 +275,7 @@ function MessageContent({ message }: { message: Message }) {
 
     default:
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
+        <p className="whitespace-pre-wrap wrap-anywhere text-sm">
           {message.content_text || "[Unsupported message type]"}
         </p>
       );
@@ -284,7 +325,7 @@ export function MessageBubble({
         >
           <span
             className={cn(
-              "text-[10px]",
+              "text-[10px] tabular-nums",
               // Outbound bubbles sit on the primary fill, so the
               // timestamp must read against that (not the neutral
               // foreground) — otherwise it goes low-contrast in light

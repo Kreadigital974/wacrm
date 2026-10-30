@@ -16,6 +16,7 @@ import type {
 } from '@/types'
 import { supabaseAdmin } from './admin-client'
 import { engineSendText, engineSendTemplate } from './meta-send'
+import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 
 // ------------------------------------------------------------
 // Public API
@@ -527,11 +528,23 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
     case 'send_webhook': {
       const cfg = step.step_config as SendWebhookStepConfig
       if (!cfg.url) throw new Error('send_webhook needs url')
+      // SSRF guard: refuse a target that resolves to a private / loopback /
+      // link-local address, mirroring the outbound-webhook delivery path
+      // (src/lib/webhooks/deliver.ts). The user controls cfg.url via the
+      // automation builder, so an unguarded fetch could reach cloud metadata
+      // (169.254.169.254) or internal services.
+      if (!(await isDeliverableUrl(cfg.url))) {
+        throw new Error('send_webhook target is not a public address')
+      }
       const body = cfg.body_template ? interpolate(cfg.body_template, args) : JSON.stringify(args.context)
       const res = await fetch(cfg.url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(cfg.headers ?? {}) },
         body,
+        // Do NOT follow redirects — a public URL could 3xx-bounce to an
+        // internal address, bypassing the SSRF check above.
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10_000),
       })
       if (!res.ok) throw new Error(`webhook returned ${res.status}`)
       return `webhook ${res.status}`

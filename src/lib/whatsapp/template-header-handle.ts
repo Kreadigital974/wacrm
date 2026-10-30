@@ -1,5 +1,6 @@
 import { uploadResumableMedia } from '@/lib/whatsapp/meta-api'
 import type { TemplatePayload } from '@/lib/whatsapp/template-validators'
+import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 
 /**
  * Meta requires an `example.header_handle` (from the Resumable Upload
@@ -35,14 +36,24 @@ export async function ensureImageHeaderHandle(
 
   // Fetch the sample image bytes (works for our uploaded chat-media URL
   // and for a manually-pasted public link).
+  // SSRF guard: the URL is user-supplied, so block private/loopback/link-local
+  // targets before the request (mirrors src/lib/webhooks/deliver.ts).
+  if (!(await isDeliverableUrl(payload.header_media_url))) {
+    throw new Error('The header image URL must be a publicly reachable address.')
+  }
   let res: Response
   try {
-    res = await fetch(payload.header_media_url)
+    res = await fetch(payload.header_media_url, {
+      // Do NOT follow redirects — a public URL could 3xx-bounce to an internal
+      // address, bypassing the SSRF check above.
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10_000),
+    })
   } catch {
     throw new Error('Could not fetch the header image URL. Make sure it is publicly reachable.')
   }
   if (!res.ok) {
-    throw new Error(`Header image URL returned ${res.status}. It must be publicly reachable.`)
+    throw new Error('The header image URL could not be fetched. It must be publicly reachable.')
   }
 
   const contentType = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()

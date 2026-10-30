@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { requireRole, toErrorResponse } from '@/lib/auth/account'
 
 /**
  * GET   /api/flows/[id]  — fetch one flow with its nodes.
@@ -94,6 +95,18 @@ export async function PUT(
   const guard = await requireOwnership(id)
   if (!guard.ok) return NextResponse.json(guard.body, { status: guard.status })
 
+  // The RLS SELECT in requireOwnership() is passed by ANY account member,
+  // including read-only 'viewer'. But the writes below use the service-role
+  // client (supabaseAdmin) which bypasses the flows_update/flows_delete RLS
+  // policies that require the 'agent' role. Enforce that role explicitly here
+  // so a viewer cannot rewrite flows via the service-role path.
+  let accountId: string
+  try {
+    ;({ accountId } = await requireRole('agent'))
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+
   const body = (await request.json().catch(() => null)) as PutBody | null
   if (!body) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
@@ -128,6 +141,7 @@ export async function PUT(
     .from('flows')
     .update(flowPatch)
     .eq('id', id)
+    .eq('account_id', accountId)
   if (updErr) {
     return NextResponse.json({ error: updErr.message }, { status: 500 })
   }
@@ -180,12 +194,26 @@ export async function DELETE(
   const guard = await requireOwnership(id)
   if (!guard.ok) return NextResponse.json(guard.body, { status: guard.status })
 
+  // Deleting a flow is a destructive write through the service-role client,
+  // which bypasses the flows_delete RLS policy (min role 'agent'). A viewer
+  // passes requireOwnership()'s RLS SELECT, so enforce the role explicitly.
+  let accountId: string
+  try {
+    ;({ accountId } = await requireRole('agent'))
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+
   // CASCADE on flow_nodes / flow_runs / flow_run_events handles the
   // children. Active runs end abruptly — there's no graceful "drain"
   // mechanism in v1, but that's intentional: deleting a flow is a
   // deliberate destructive action and the partial unique index will
   // free up the contact for new triggers immediately.
-  const { error } = await supabaseAdmin().from('flows').delete().eq('id', id)
+  const { error } = await supabaseAdmin()
+    .from('flows')
+    .delete()
+    .eq('id', id)
+    .eq('account_id', accountId)
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

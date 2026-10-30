@@ -10,9 +10,13 @@ export async function GET(
   try {
     const { mediaId } = await params
 
-    if (!mediaId) {
+    // Meta media IDs are numeric strings. Enforce that strictly so a forged
+    // value (e.g. `me?fields=id,name`, a phone_number_id, or `..%2f...`) cannot
+    // be interpolated into the outbound Graph API URL and pivot the request to
+    // another Graph object/field reachable with the account's access token.
+    if (!mediaId || !/^\d+$/.test(mediaId)) {
       return NextResponse.json(
-        { error: 'Media ID is required' },
+        { error: 'Invalid media ID' },
         { status: 400 }
       )
     }

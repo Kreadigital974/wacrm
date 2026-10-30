@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { validateFlowForActivation } from '@/lib/flows/validate'
+import { requireRole, toErrorResponse } from '@/lib/auth/account'
 
 /**
  * POST /api/flows/[id]/activate
@@ -29,6 +30,16 @@ export async function POST(
   } = await supabase.auth.getUser()
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  // Changing a flow's status is a service-role write that bypasses the
+  // flows_update RLS policy (min role 'agent'). A read-only 'viewer' passes
+  // the RLS SELECT below, so enforce the role explicitly.
+  let accountId: string
+  try {
+    ;({ accountId } = await requireRole('agent'))
+  } catch (err) {
+    return toErrorResponse(err)
   }
 
   const body = (await request.json().catch(() => null)) as
@@ -99,6 +110,7 @@ export async function POST(
     .from('flows')
     .update({ status, updated_at: new Date().toISOString() })
     .eq('id', id)
+    .eq('account_id', accountId)
     .select()
     .maybeSingle()
   if (error) {
